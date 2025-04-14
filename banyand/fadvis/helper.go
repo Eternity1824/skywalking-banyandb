@@ -47,12 +47,29 @@ func init() {
 // SetMemoryProtector sets the threshold from the Memory protector instance.
 func SetMemoryProtector(mp *protector.Memory) {
 	memoryProtectorOnce.Do(func() {
-		if mp != nil {
-			// Get threshold from Memory protector
-			if threshold := mp.GetThreshold(); threshold > 0 {
+		// Defensive check for nil memory protector
+		if mp == nil {
+			Log.Warn().Msg("received nil memory protector, using default threshold")
+			return
+		}
+
+		// Get threshold from Memory protector with defensive nil check
+		threshold := int64(0)
+		defer func() {
+			// Recover from any potential panic in GetThreshold
+			if r := recover(); r != nil {
+				Log.Warn().Interface("recover", r).Msg("recovered from panic in GetThreshold, using default threshold")
+				return
+			}
+
+			// Only set threshold if it's valid
+			if threshold > 0 {
 				SetThreshold(threshold)
 			}
-		}
+		}()
+
+		// Try to get threshold
+		threshold = mp.GetThreshold()
 	})
 }
 

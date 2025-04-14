@@ -53,23 +53,9 @@ func TestSetGetThreshold(t *testing.T) {
 	}
 }
 
-// Skip the memory protector integration test as it requires a valid metrics registry
+// Skip the memory protector integration test as it requires a valid metrics registry.
 func TestMemoryProtectorIntegration(t *testing.T) {
 	t.Skip("Skipping test as it requires a valid metrics registry")
-
-	// The test below would cause a nil pointer dereference since NewMemory requires a valid metrics registry
-	/*
-		// Mock memory protector
-		mp := protector.NewMemory(nil)
-
-		// Test setting memory protector
-		SetMemoryProtector(mp)
-
-		// Test threshold from protector
-		expectedThreshold := mp.GetThreshold()
-		assert.True(t, expectedThreshold > 0, "Threshold from Memory protector should be positive")
-		assert.Equal(t, expectedThreshold, GetThreshold(), "Threshold should be set from Memory protector")
-	*/
 }
 
 func TestApplyIfLarge(t *testing.T) {
@@ -107,7 +93,7 @@ func TestApplyIfLarge(t *testing.T) {
 	}, "MustApplyIfLarge should not panic")
 }
 
-// Helper function to create a test file with specified size
+// Helper function to create a test file with specified size.
 func createTestFile(t *testing.T, filename string, size int64) {
 	t.Helper()
 
