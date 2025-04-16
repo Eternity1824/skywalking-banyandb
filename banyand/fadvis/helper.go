@@ -23,6 +23,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/apache/skywalking-banyandb/banyand/protector"
 	"github.com/apache/skywalking-banyandb/pkg/fadvis"
@@ -35,42 +36,113 @@ var (
 	LargeFileThreshold atomic.Int64
 	// Log is the logger for fadvis related operations.
 	Log = logger.GetLogger("fadvis-helper")
-	// Only use once to ensure SetMemoryProtector is called only once.
-	memoryProtectorOnce sync.Once
+	// memoryProtector holds the reference to the Memory protector
+	memoryProtector *protector.Memory
+	// memoryProtectorMu protects memoryProtector from concurrent access
+	memoryProtectorMu sync.RWMutex
+	// stopChan is used to signal the background updater to stop
+	stopChan chan struct{}
+	// started indicates if the background updater has been started
+	started bool
+	// startMu protects the started flag and init process
+	startMu sync.Mutex
 )
 
 func init() {
 	// Default 64MB.
 	LargeFileThreshold.Store(64 * 1024 * 1024)
+	// Initialize stop channel
+	stopChan = make(chan struct{})
 }
 
-// SetMemoryProtector sets the threshold from the Memory protector instance.
+// SetMemoryProtector sets the threshold from the Memory protector instance
+// and starts a background goroutine to update the threshold every 30 minutes.
 func SetMemoryProtector(mp *protector.Memory) {
-	memoryProtectorOnce.Do(func() {
-		// Defensive check for nil memory protector
-		if mp == nil {
-			Log.Warn().Msg("received nil memory protector, using default threshold")
+	startMu.Lock()
+	defer startMu.Unlock()
+
+	// Defensive check for nil memory protector
+	if mp == nil {
+		Log.Warn().Msg("received nil memory protector, using default threshold")
+		return
+	}
+
+	// Store memory protector for future updates
+	memoryProtectorMu.Lock()
+	memoryProtector = mp
+	memoryProtectorMu.Unlock()
+
+	// Get and set initial threshold
+	updateThresholdFromProtector()
+
+	// Start background updater if not already started
+	if !started {
+		go periodicThresholdUpdater(30 * time.Minute)
+		started = true
+		Log.Info().Dur("interval", 30*time.Minute).Msg("started periodic threshold updater")
+	}
+}
+
+// updateThresholdFromProtector gets the threshold from the memory protector and updates the current threshold.
+func updateThresholdFromProtector() {
+	memoryProtectorMu.RLock()
+	mp := memoryProtector
+	memoryProtectorMu.RUnlock()
+
+	// Defensive check for nil memory protector
+	if mp == nil {
+		Log.Warn().Msg("memory protector not set, cannot update threshold")
+		return
+	}
+
+	// Get threshold from Memory protector with defensive nil check and error handling
+	threshold := int64(0)
+	defer func() {
+		// Recover from any potential panic in GetThreshold
+		if r := recover(); r != nil {
+			Log.Warn().Interface("recover", r).Msg("recovered from panic in GetThreshold, keeping current threshold")
 			return
 		}
 
-		// Get threshold from Memory protector with defensive nil check
-		threshold := int64(0)
-		defer func() {
-			// Recover from any potential panic in GetThreshold
-			if r := recover(); r != nil {
-				Log.Warn().Interface("recover", r).Msg("recovered from panic in GetThreshold, using default threshold")
-				return
-			}
+		// Only set threshold if it's valid
+		if threshold > 0 {
+			SetThreshold(threshold)
+		}
+	}()
 
-			// Only set threshold if it's valid
-			if threshold > 0 {
-				SetThreshold(threshold)
-			}
-		}()
+	// Try to get threshold
+	threshold = mp.GetThreshold()
+}
 
-		// Try to get threshold
-		threshold = mp.GetThreshold()
-	})
+// periodicThresholdUpdater runs in the background and updates the threshold periodically.
+func periodicThresholdUpdater(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			Log.Debug().Msg("updating threshold from memory protector")
+			updateThresholdFromProtector()
+		case <-stopChan:
+			Log.Info().Msg("stopping periodic threshold updater")
+			return
+		}
+	}
+}
+
+// StopUpdater stops the background threshold updater.
+func StopUpdater() {
+	startMu.Lock()
+	defer startMu.Unlock()
+
+	if started {
+		close(stopChan)
+		started = false
+		// Recreate the channel for potential future use
+		stopChan = make(chan struct{})
+		Log.Info().Msg("stopped periodic threshold updater")
+	}
 }
 
 // SetThreshold sets the large file threshold.

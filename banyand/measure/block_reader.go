@@ -41,33 +41,18 @@ type seqReader struct {
 	r  fs.Reader
 	// File path for fadvis operations
 	filePath string
-	// File size to determine if it's a large file
-	fileSize  int64
-	bytesRead uint64
-	// Flag indicating if this is a large file
+	// File size from metadata
+	fileSize int64
+	// Flag indicating if this is a large file (determined at initialization)
 	isLargeFile bool
 }
 
 func (sr *seqReader) reset() {
-	// If it's a large file, apply fadvis when resetting
-	if sr.isLargeFile && sr.filePath != "" {
-		// Skip metadata index directory
-		if filepath.Base(filepath.Dir(sr.filePath)) == indexDirName {
-			return
-		}
-		if err := pkgfadvis.Apply(sr.filePath); err != nil {
-			measureFadvisLog.Warn().Err(err).Str("path", sr.filePath).Msg("failed to apply fadvis")
-		} else {
-			measureFadvisLog.Debug().Str("path", sr.filePath).Msg("applied fadvis to file")
-		}
-	}
-
 	sr.r = nil
 	if sr.sr != nil {
 		fs.MustClose(sr.sr)
 	}
 	sr.sr = nil
-	sr.bytesRead = 0
 	sr.filePath = ""
 	sr.fileSize = 0
 	sr.isLargeFile = false
@@ -88,16 +73,22 @@ func (sr *seqReader) init(r fs.Reader) {
 		return
 	}
 
-	// Get file size and determine if it's a large file
+	// Get file size from metadata and determine if it's a large file
 	if fileInfo, err := os.Stat(sr.filePath); err == nil {
 		sr.fileSize = fileInfo.Size()
 		sr.isLargeFile = sr.fileSize > fadvis.GetThreshold()
+
 		if sr.isLargeFile {
 			measureFadvisLog.Debug().
 				Str("path", sr.filePath).
 				Int64("size", sr.fileSize).
 				Int64("threshold", fadvis.GetThreshold()).
-				Msg("large file detected, will apply fadvis on close")
+				Msg("identified large file, will apply fadvis during read operations")
+
+			// Apply fadvis immediately for large files during initialization
+			if err := pkgfadvis.Apply(sr.filePath); err != nil {
+				measureFadvisLog.Warn().Err(err).Str("path", sr.filePath).Msg("failed to apply fadvis during initialization")
+			}
 		}
 	}
 }
@@ -113,7 +104,13 @@ func (sr *seqReader) mustReadFull(data []byte) {
 	if n != len(data) {
 		logger.Panicf("cannot read full data: %d/%d", n, len(data))
 	}
-	sr.bytesRead += uint64(n)
+
+	// Apply fadvis for large files during read operations
+	if sr.isLargeFile {
+		if err := pkgfadvis.Apply(sr.filePath); err != nil {
+			measureFadvisLog.Warn().Err(err).Str("path", sr.filePath).Msg("failed to apply fadvis during read")
+		}
+	}
 }
 
 func generateSeqReader() *seqReader {

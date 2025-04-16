@@ -22,6 +22,30 @@
 // to ensure cross-platform compatibility.
 package fadvis
 
+import (
+	"os"
+)
+
+// openFileDescriptor opens a file and returns a dummy file descriptor.
+func openFileDescriptor(path string) (int, error) {
+	// On non-Linux platforms, we just check if the file exists
+	_, err := os.Stat(path)
+	if err != nil {
+		return -1, err
+	}
+	return 0, nil
+}
+
+// closeFileDescriptor is a no-op on non-Linux platforms.
+func closeFileDescriptor(fd int) error {
+	return nil
+}
+
+// applyFadvise is a no-op on non-Linux platforms.
+func (t *IOTracker) applyFadvise() error {
+	return nil
+}
+
 // Apply is a no-op on non-Linux platforms.
 // The POSIX_FADV_DONTNEED functionality is specific to Linux.
 func Apply(_ string) error {

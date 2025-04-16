@@ -23,10 +23,39 @@ package fs
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"syscall"
 
 	"golang.org/x/sys/unix"
 )
+
+// Unix-specific constants for fadvise
+const (
+	// FADV_DONTNEED 释放指定范围内的页面缓存
+	FADV_DONTNEED = 4
+)
+
+func init() {
+	// 在非 Linux 系统上，applyFadviseToFd 是空操作
+	// Linux 系统上的实现在 fadvis_linux.go 中
+	if runtime.GOOS != "linux" {
+		applyFadviseToFd = func(fd int, offset, length int64) error {
+			return nil
+		}
+	}
+}
+
+// ApplyPageCacheHint 在 Unix 系统上应用页面缓存提示
+func ApplyPageCacheHint(file *os.File, offset, length int64) error {
+	if file == nil {
+		return nil
+	}
+
+	fd := int(file.Fd())
+
+	// 使用 applyFadviseToFd 函数，它在 Linux 和非 Linux 平台上有不同的实现
+	return applyFadviseToFd(fd, offset, length)
+}
 
 // localFileSystem is the implementation of FileSystem interface.
 func (*localFileSystem) CreateLockFile(name string, permission Mode) (File, error) {
@@ -39,9 +68,8 @@ func (*localFileSystem) CreateLockFile(name string, permission Mode) (File, erro
 				Message: fmt.Sprintf("Cannot lock file, file name: %s, error message: %s", name, err),
 			}
 		}
-		return &LocalFile{
-			file: file,
-		}, nil
+		// 确保 LocalFile 实现了所有必需的 File 接口方法
+		return NewFile(file, name), nil
 	case os.IsExist(err):
 		return nil, &FileSystemError{
 			Code:    isExistError,

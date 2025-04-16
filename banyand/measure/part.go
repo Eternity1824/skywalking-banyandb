@@ -29,6 +29,7 @@ import (
 	"github.com/apache/skywalking-banyandb/banyand/fadvis"
 	"github.com/apache/skywalking-banyandb/banyand/internal/storage"
 	"github.com/apache/skywalking-banyandb/pkg/bytes"
+	pkgfadvis "github.com/apache/skywalking-banyandb/pkg/fadvis"
 	"github.com/apache/skywalking-banyandb/pkg/fs"
 	"github.com/apache/skywalking-banyandb/pkg/logger"
 	"github.com/apache/skywalking-banyandb/pkg/pool"
@@ -62,6 +63,9 @@ type part struct {
 }
 
 func (p *part) close() {
+	// Apply fadvis before closing the files
+	p.applyFadvisToPartFiles()
+
 	fs.MustClose(p.primary)
 	fs.MustClose(p.timestamps)
 	fs.MustClose(p.fieldValues)
@@ -213,16 +217,18 @@ func (mp *memPart) mustFlush(fileSystem fs.FileSystem, path string) {
 	// Sync to disk
 	fileSystem.SyncPath(path)
 
-	// Apply fadvis to large files
-	primaryPath := filepath.Join(path, primaryFilename)
-	fadvis.ApplyIfLarge(primaryPath)
+	// Get threshold for large file detection
+	threshold := fadvis.GetThreshold()
 
-	timestampsPath := filepath.Join(path, timestampsFilename)
-	fadvis.ApplyIfLarge(timestampsPath)
+	// Apply fadvis to all large files
+	applyFadvisIfLarge(filepath.Join(path, primaryFilename), threshold)
+	applyFadvisIfLarge(filepath.Join(path, timestampsFilename), threshold)
+	applyFadvisIfLarge(filepath.Join(path, fieldValuesFilename), threshold)
 
+	// Apply fadvis to tag family files
 	for name := range mp.tagFamilies {
-		fieldPath := filepath.Join(path, name+tagFamiliesFilenameExt)
-		fadvis.ApplyIfLarge(fieldPath)
+		applyFadvisIfLarge(filepath.Join(path, name+tagFamiliesFilenameExt), threshold)
+		applyFadvisIfLarge(filepath.Join(path, name+tagFamiliesMetadataFilenameExt), threshold)
 	}
 }
 
@@ -366,36 +372,66 @@ func partName(epoch uint64) string {
 
 // applyFadvisToPartFiles syncs the directory and applies fadvis to large files if needed.
 func (p *part) applyFadvisToPartFiles() {
+	// Skip if no file system or path
+	if p.fileSystem == nil || p.path == "" {
+		return
+	}
+
+	// Skip metadata index directory
+	if filepath.Base(p.path) == indexDirName {
+		return
+	}
+
 	fs := p.fileSystem
-
-	// Create directories if needed
-	fs.MkdirIfNotExist(p.path, 0o750)
-
-	// Initialize file path variables
-	primaryFile := filepath.Join(p.path, primaryFilename)
-	timestampsFile := filepath.Join(p.path, timestampsFilename)
-
-	// In the part struct, primary, timestamps, and tagFamilies fields are of fs.Reader type
-	// Unlike bytes.Buffer in memPart, they cannot be flushed directly
-	// This method is mainly used for syncing directories and applying fadvis,
-	// rather than writing memory data to disk like memPart.mustFlush
 
 	// Sync the directory to ensure all files are flushed to disk
 	fs.SyncPath(p.path)
 
-	// Apply fadvis to large files to improve file system performance
-	if _, err := os.Stat(primaryFile); err == nil && p.primary != nil {
-		fadvis.ApplyIfLarge(primaryFile)
-	}
+	// Initialize file path variables
+	primaryFile := filepath.Join(p.path, primaryFilename)
+	timestampsFile := filepath.Join(p.path, timestampsFilename)
+	fieldsFile := filepath.Join(p.path, fieldValuesFilename)
 
-	if _, err := os.Stat(timestampsFile); err == nil && p.timestamps != nil {
-		fadvis.ApplyIfLarge(timestampsFile)
-	}
+	// Get threshold for large file detection
+	threshold := fadvis.GetThreshold()
 
+	// Apply fadvis to primary files if they're large
+	applyFadvisIfLarge(primaryFile, threshold)
+	applyFadvisIfLarge(timestampsFile, threshold)
+	applyFadvisIfLarge(fieldsFile, threshold)
+
+	// Apply fadvis to all tag family files
 	for name := range p.tagFamilies {
 		tfFile := filepath.Join(p.path, name+tagFamiliesFilenameExt)
-		if _, err := os.Stat(tfFile); err == nil {
-			fadvis.ApplyIfLarge(tfFile)
+		applyFadvisIfLarge(tfFile, threshold)
+
+		tfMetaFile := filepath.Join(p.path, name+tagFamiliesMetadataFilenameExt)
+		applyFadvisIfLarge(tfMetaFile, threshold)
+	}
+}
+
+// applyFadvisIfLarge checks if a file is large using metadata and applies fadvis if needed
+func applyFadvisIfLarge(filePath string, threshold int64) {
+	// Get file metadata
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		// File might not exist or be inaccessible
+		return
+	}
+
+	// Check if file is large
+	isLargeFile := fileInfo.Size() > threshold
+
+	if isLargeFile {
+		// Apply fadvis to large file
+		if err := pkgfadvis.Apply(filePath); err != nil {
+			measureFadvisLog.Warn().Err(err).Str("path", filePath).Msg("failed to apply fadvis to file")
+		} else {
+			measureFadvisLog.Debug().
+				Str("path", filePath).
+				Int64("size", fileInfo.Size()).
+				Int64("threshold", threshold).
+				Msg("applied fadvis to large file")
 		}
 	}
 }

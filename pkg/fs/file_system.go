@@ -34,6 +34,10 @@ type SeqWriter interface {
 	io.Writer
 	Path() string
 	Close() error
+	// Fd returns the underlying file descriptor.
+	Fd() int
+	// Offset returns the current write offset.
+	Offset() int64
 }
 
 // Writer allows writing data to a file.
@@ -46,6 +50,10 @@ type Writer interface {
 	Path() string
 	// Close File.
 	Close() error
+	// Fd returns the underlying file descriptor.
+	Fd() int
+	// Offset returns the current write offset.
+	Offset() int64
 }
 
 // SeqReader allows reading data from a file in a sequential way.
@@ -53,6 +61,10 @@ type SeqReader interface {
 	io.Reader
 	Path() string
 	Close() error
+	// Fd returns the underlying file descriptor.
+	Fd() int
+	// Offset returns the current read offset.
+	Offset() int64
 }
 
 // Reader allows reading data from a file.
@@ -65,6 +77,10 @@ type Reader interface {
 	Path() string
 	// Close File.
 	Close() error
+	// Fd returns the underlying file descriptor.
+	Fd() int
+	// Offset returns the current read offset.
+	Offset() int64
 }
 
 // Closer allows closing a file.

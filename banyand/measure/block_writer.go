@@ -18,11 +18,14 @@
 package measure
 
 import (
+	"os"
 	"path/filepath"
 
 	"github.com/apache/skywalking-banyandb/api/common"
+	"github.com/apache/skywalking-banyandb/banyand/fadvis"
 	"github.com/apache/skywalking-banyandb/banyand/internal/storage"
 	"github.com/apache/skywalking-banyandb/pkg/compress/zstd"
+	pkgfadvis "github.com/apache/skywalking-banyandb/pkg/fadvis"
 	"github.com/apache/skywalking-banyandb/pkg/fs"
 	"github.com/apache/skywalking-banyandb/pkg/logger"
 	"github.com/apache/skywalking-banyandb/pkg/pool"
@@ -31,13 +34,17 @@ import (
 type writer struct {
 	sw           fs.SeqWriter
 	w            fs.Writer
-	bytesWritten uint64
+	bytesWritten uint64 // Tracks number of bytes written for statistics
+	filePath     string // Path to the file being written
+	isLargeFile  bool   // Flag indicating if this will be a large file
 }
 
 func (w *writer) reset() {
 	w.w = nil
 	w.sw = nil
 	w.bytesWritten = 0
+	w.filePath = ""
+	w.isLargeFile = false
 }
 
 func (w *writer) init(wc fs.Writer) {
@@ -45,16 +52,65 @@ func (w *writer) init(wc fs.Writer) {
 
 	w.w = wc
 	w.sw = wc.SequentialWrite()
+	w.filePath = wc.Path()
+
+	// Skip metadata index directory
+	if filepath.Base(filepath.Dir(w.filePath)) == indexDirName {
+		return
+	}
+
+	// For write operations, check if file already exists and has size
+	if fileInfo, err := os.Stat(w.filePath); err == nil && fileInfo.Size() > 0 {
+		// File exists and has content, check if it's already a large file
+		w.isLargeFile = fileInfo.Size() > fadvis.GetThreshold()
+	} else {
+		// For new files or empty files, assume they will become large files
+		// This is a safe assumption for write operations
+		w.isLargeFile = true
+	}
+
+	if w.isLargeFile {
+		measureFadvisLog.Debug().
+			Str("path", w.filePath).
+			Int64("threshold", fadvis.GetThreshold()).
+			Msg("identified file as potentially large, will apply fadvis during write operations")
+	}
 }
 
 func (w *writer) MustWrite(data []byte) {
 	fs.MustWriteData(w.sw, data)
 	w.bytesWritten += uint64(len(data))
+
+	// Apply fadvis for large files during write operations
+	if w.isLargeFile && w.filePath != "" {
+		// Skip metadata index directory (double check)
+		if filepath.Base(filepath.Dir(w.filePath)) == indexDirName {
+			return
+		}
+
+		if err := pkgfadvis.Apply(w.filePath); err != nil {
+			measureFadvisLog.Warn().Err(err).Str("path", w.filePath).Msg("failed to apply fadvis during write")
+		}
+	}
 }
 
 func (w *writer) MustClose() {
 	fs.MustClose(w.sw)
 	fs.MustClose(w.w)
+
+	// Apply fadvis one final time when closing
+	if w.isLargeFile && w.filePath != "" {
+		// Skip metadata index directory (double check)
+		if filepath.Base(filepath.Dir(w.filePath)) == indexDirName {
+			w.reset()
+			return
+		}
+
+		if err := pkgfadvis.Apply(w.filePath); err != nil {
+			measureFadvisLog.Warn().Err(err).Str("path", w.filePath).Msg("failed to apply fadvis during close")
+		}
+	}
+
 	w.reset()
 }
 
