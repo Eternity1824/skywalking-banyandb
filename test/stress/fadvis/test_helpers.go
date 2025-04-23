@@ -19,14 +19,15 @@ package fadvis
 
 import (
 	"fmt"
-	"math/rand"
+	"github.com/apache/skywalking-banyandb/banyand/fadvis"
+	"github.com/apache/skywalking-banyandb/pkg/fs"
+	"github.com/apache/skywalking-banyandb/pkg/fs/fadvise"
+	"github.com/apache/skywalking-banyandb/pkg/logger"
+	"github.com/stretchr/testify/require"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
-
-	"github.com/apache/skywalking-banyandb/banyand/fadvis"
-	"github.com/stretchr/testify/require"
 )
 
 // Constants for file sizes and thresholds
@@ -46,83 +47,74 @@ const (
 	DefaultConcurrency = 4
 )
 
+// fileSystem is the file system instance used for all operations
+var fileSystem fs.FileSystem
+
 func init() {
-	// Seed the random number generator
-	rand.Seed(time.Now().UnixNano())
+	// Initialize the file system
+	fileSystem = fs.NewLocalFileSystemWithLogger(logger.GetLogger("fadvis-benchmark"))
 }
 
 // createTestFile creates a test file of the specified size.
-// It automatically applies fadvise if the file size exceeds the threshold.
+// It uses the fs package which automatically applies fadvise if the file size exceeds the threshold.
 func createTestFile(t testing.TB, filePath string, size int64) error {
 	// Create parent directories if they don't exist
 	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 		return err
 	}
 
-	// Create the file
-	file, err := os.Create(filePath)
+	// Create the file using the fs package
+	file, err := fileSystem.CreateFile(filePath, 0644)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
 	// Truncate to the desired size
-	if err := file.Truncate(size); err != nil {
-		return err
-	}
+	os.Truncate(filePath, size)
 
-	// Apply fadvise if file size exceeds threshold
-	if size > fadvis.GetThreshold() {
-		fadvis.ApplyIfLarge(filePath)
-	}
+	// No need to manually apply fadvise, the fs package handles it automatically
+	// based on the configured threshold
 
-	// Sync to ensure the file is written to disk
-	return file.Sync()
+	return nil
 }
 
 // readFileWithFadvise reads a file with automatic fadvise application.
-// It applies fadvise if the file size exceeds the threshold.
+// It uses the fs package which automatically applies fadvise if the file size exceeds the threshold.
 func readFileWithFadvise(t testing.TB, filePath string) ([]byte, error) {
-	// Check file size
-	info, err := os.Stat(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	// Apply fadvise if file size exceeds threshold
-	if info.Size() > fadvis.GetThreshold() {
-		fadvis.ApplyIfLarge(filePath)
-	}
-
-	// Read the file
-	return os.ReadFile(filePath)
+	// Read the file using the fs package
+	return fileSystem.Read(filePath)
+	// No need to manually apply fadvise, the fs package handles it automatically
 }
 
 // appendToFile appends data to a file, creating it if it doesn't exist.
-// It automatically applies fadvise if the file size exceeds the threshold.
+// It uses the fs package which automatically applies fadvise if the file size exceeds the threshold.
 func appendToFile(filePath string, data []byte) error {
-	// Check if file exists and get its size
-	info, err := os.Stat(filePath)
+	// Check if file exists
+	_, err := os.Stat(filePath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// Open or create the file using the fs package
+	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open file for append: %w", err)
 	}
-	defer f.Close()
 
-	if _, err := f.Write(data); err != nil {
+	// Create a fadvise file wrapper
+	fadvisFile := fadvise.NewFileWithThreshold(file, filePath, fadvis.GetThreshold())
+	defer fadvisFile.Close()
+
+	// Write data using the fadvise wrapper
+	_, err = fadvisFile.Write(data)
+	if err != nil {
 		return fmt.Errorf("failed to write data: %w", err)
 	}
 
-	// Apply fadvise if total size exceeds threshold
-	if info != nil && info.Size()+int64(len(data)) > fadvis.GetThreshold() {
-		fadvis.ApplyIfLarge(filePath)
-	}
+	// No need to manually apply fadvise, the fs package handles it automatically
 
-	return f.Sync()
+	return nil
 }
 
 // setupTestEnvironment creates a test directory and returns a cleanup function.
@@ -145,30 +137,41 @@ func createTestParts(t testing.TB, testDir string, numParts int, partSize int64)
 
 // simulateMergeOperation simulates a merge operation by reading parts and writing to an output file.
 func simulateMergeOperation(t testing.TB, outputFile string, parts []string) {
-	out, err := os.Create(outputFile)
+	// Create the output file using the fs package
+	outFile, err := fileSystem.CreateFile(outputFile, 0644)
 	require.NoError(t, err)
-	defer out.Close()
+	defer outFile.Close()
+
+	// Create a sequential writer
+	seqWriter := outFile.SequentialWrite()
+	defer seqWriter.Close()
 
 	// Read from parts and write to output file
 	buffer := make([]byte, 8192)
 	for _, part := range parts {
-		in, err := os.Open(part)
+		// Open each part file using the fs package
+		inFile, err := fileSystem.OpenFile(part)
 		require.NoError(t, err)
 
+		// Create a sequential reader
+		seqReader := inFile.SequentialRead()
+
 		for {
-			n, err := in.Read(buffer)
+			n, err := seqReader.Read(buffer)
 			if n == 0 || err != nil {
+				if err != io.EOF {
+					require.NoError(t, err)
+				}
 				break
 			}
 
-			_, err = out.Write(buffer[:n])
+			_, err = seqWriter.Write(buffer[:n])
 			require.NoError(t, err)
 		}
 
-		in.Close()
+		seqReader.Close()
+		inFile.Close()
 	}
 
-	// Sync to ensure data is written
-	err = out.Sync()
-	require.NoError(t, err)
+	// No need to manually apply fadvise, the fs package handles it automatically
 }

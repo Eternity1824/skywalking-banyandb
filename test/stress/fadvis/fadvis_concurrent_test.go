@@ -19,25 +19,12 @@ package fadvis
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/apache/skywalking-banyandb/banyand/fadvis"
 	"github.com/stretchr/testify/require"
-)
-
-// Test constants
-const (
-	// Default threshold for large files (100MB)
-	DefaultThreshold = 100 * 1024 * 1024
-	// Small file size (10MB)
-	SmallFileSize = 10 * 1024 * 1024
-	// Large file size (200MB)
-	LargeFileSize = 200 * 1024 * 1024
-	// Default concurrency level
-	defaultConcurrency = 4
 )
 
 // BenchmarkConcurrentOperations tests the performance of concurrent file operations
@@ -50,7 +37,7 @@ func BenchmarkConcurrentOperations(b *testing.B) {
 	files := make([]string, numFiles)
 	for i := 0; i < numFiles; i++ {
 		files[i] = filepath.Join(testDir, fmt.Sprintf("test_file_%d", i))
-		err := createTestFile(b, files[i], LargeFileSize)
+		err := createTestFile(b, files[i], 200*1024*1024)
 		require.NoError(b, err)
 	}
 
@@ -66,7 +53,7 @@ func BenchmarkConcurrentMerges(b *testing.B) {
 
 	// Create test parts for merging
 	numParts := 5 // Default number of parts
-	parts := createTestParts(b, testDir, numParts, SmallFileSize)
+	parts := createTestParts(b, testDir, numParts, 10*1024*1024)
 
 	b.Run("ConcurrentMerges", func(b *testing.B) {
 		benchmarkConcurrentMerges(b, testDir, parts)
@@ -102,14 +89,14 @@ func BenchmarkThresholdAdaptation(b *testing.B) {
 	}{
 		{
 			name:           "SmallFileHighThreshold",
-			fileSize:       SmallFileSize,
-			threshold:      DefaultThreshold,
+			fileSize:       10 * 1024 * 1024,
+			threshold:      100 * 1024 * 1024,
 			memoryPressure: "normal",
 		},
 		{
 			name:           "LargeFileLowThreshold",
-			fileSize:       LargeFileSize,
-			threshold:      DefaultThreshold / 2,
+			fileSize:       200 * 1024 * 1024,
+			threshold:      50 * 1024 * 1024,
 			memoryPressure: "high",
 		},
 	}
@@ -146,33 +133,4 @@ func BenchmarkThresholdAdaptation(b *testing.B) {
 			}
 		})
 	}
-}
-
-// createTestFile creates a test file of specified size
-func createTestFile(b *testing.B, filename string, size int64) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	// Truncate the file to the desired size
-	if err := file.Truncate(size); err != nil {
-		return err
-	}
-
-	// Write some data to the file
-	data := make([]byte, 1024)
-	for i := 0; i < 1024; i++ {
-		data[i] = byte(i % 256)
-	}
-
-	for i := int64(0); i < size/1024; i++ {
-		if _, err := file.Write(data); err != nil {
-			return err
-		}
-	}
-
-	// Ensure the file is written to disk
-	return file.Sync()
 }

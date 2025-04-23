@@ -44,17 +44,23 @@ func BenchmarkMergeOperations(b *testing.B) {
 
 	// Run benchmark with fadvise disabled
 	b.Run("WithoutFadvise", func(b *testing.B) {
+		// Set the fadvis threshold to a high value to disable it
+		fadvis.SetThreshold(terabyte)
 		for i := 0; i < b.N; i++ {
 			outputFile := filepath.Join(testDir, fmt.Sprintf("merged_%d", i))
-			simulateMergeOperation(b, outputFile, parts, false)
+			// Use the simulateMergeOperation from test_helpers.go which uses fs package
+			simulateMergeOperation(b, outputFile, parts)
 		}
 	})
 
 	// Run benchmark with fadvise enabled
 	b.Run("WithFadvise", func(b *testing.B) {
+		// Set the fadvis threshold to enable it for large files
+		fadvis.SetThreshold(DefaultThreshold)
 		for i := 0; i < b.N; i++ {
 			outputFile := filepath.Join(testDir, fmt.Sprintf("merged_%d", i))
-			simulateMergeOperation(b, outputFile, parts, true)
+			// Use the simulateMergeOperation from test_helpers.go which uses fs package
+			simulateMergeOperation(b, outputFile, parts)
 		}
 	})
 }
@@ -75,86 +81,23 @@ func BenchmarkSequentialMergeOperations(b *testing.B) {
 
 	// Run benchmark with fadvise disabled
 	b.Run("WithoutFadvise", func(b *testing.B) {
+		// Set the fadvis threshold to a high value to disable it
+		fadvis.SetThreshold(terabyte)
 		for i := 0; i < b.N; i++ {
 			outputFile := filepath.Join(testDir, fmt.Sprintf("merged_%d", i))
-			simulateMergeOperation(b, outputFile, parts, false)
+			// Use the simulateMergeOperation from test_helpers.go which uses fs package
+			simulateMergeOperation(b, outputFile, parts)
 		}
 	})
 
 	// Run benchmark with fadvise enabled
 	b.Run("WithFadvise", func(b *testing.B) {
+		// Set the fadvis threshold to enable it for large files
+		fadvis.SetThreshold(DefaultThreshold)
 		for i := 0; i < b.N; i++ {
 			outputFile := filepath.Join(testDir, fmt.Sprintf("merged_%d", i))
-			simulateMergeOperation(b, outputFile, parts, true)
+			// Use the simulateMergeOperation from test_helpers.go which uses fs package
+			simulateMergeOperation(b, outputFile, parts)
 		}
 	})
-}
-
-// createTestParts prepares test files for merge benchmark.
-func createTestParts(b *testing.B, testDir string, numParts int, fileSize int64) []string {
-	parts := make([]string, numParts)
-	for i := 0; i < numParts; i++ {
-		partPath := filepath.Join(testDir, fmt.Sprintf("part_%d", i))
-		err := createTestFile(b, partPath, fileSize)
-		require.NoError(b, err)
-		parts[i] = partPath
-	}
-	return parts
-}
-
-// simulateMergeOperation simulates a merge operation by reading parts and writing to an output file.
-func simulateMergeOperation(b *testing.B, outputFile string, parts []string, useFadvise bool) {
-	out, err := os.Create(outputFile)
-	require.NoError(b, err)
-	defer out.Close()
-
-	// Read from parts and write to output file
-	buffer := make([]byte, 8192)
-	for _, part := range parts {
-		in, err := os.Open(part)
-		require.NoError(b, err)
-
-		for {
-			n, err := in.Read(buffer)
-			if n == 0 || err != nil {
-				break
-			}
-
-			_, err = out.Write(buffer[:n])
-			require.NoError(b, err)
-		}
-
-		in.Close()
-	}
-
-	// Sync to ensure data is written
-	err = out.Sync()
-	require.NoError(b, err)
-
-	// Apply fadvise to merged files if enabled
-	if useFadvise {
-		// Apply fadvise to all large files in the merged part
-		fadvis.ApplyIfLarge(outputFile)
-	}
-}
-
-// createTestFile creates a test file of the specified size.
-func createTestFile(b *testing.B, path string, size int64) {
-	file, err := os.Create(path)
-	if err != nil {
-		b.Fatalf("Failed to create file %s: %v", path, err)
-	}
-	defer file.Close()
-
-	// Allocate the file to the specified size
-	err = file.Truncate(size)
-	if err != nil {
-		b.Fatalf("Failed to truncate file %s to size %d: %v", path, size, err)
-	}
-
-	// Sync the file to ensure it's written to disk
-	err = file.Sync()
-	if err != nil {
-		b.Fatalf("Failed to sync file %s: %v", path, err)
-	}
 }
