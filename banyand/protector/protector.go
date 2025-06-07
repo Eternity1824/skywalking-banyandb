@@ -203,3 +203,73 @@ func (m *Memory) Serve() run.StopNotify {
 	}()
 	return m.closed
 }
+
+// GetThreshold returns the threshold for large file detection (1% of page cache).
+func (m *Memory) GetThreshold(maxSize int64) int64 {
+	// Try reading cgroup memory limit
+	cgLimit, err := cgroups.MemoryLimit()
+	if err != nil {
+		m.l.Warn().Err(err).Msg("failed to get memory limit from cgroups, using default threshold")
+		// Fallback default threshold of 64MB
+		defaultThreshold := int64(64 * 1024 * 1024)
+		if defaultThreshold > maxSize {
+			return maxSize
+		}
+		return defaultThreshold
+	}
+
+	// Determine effective memory to use based on flags
+	var totalMemory int64
+	if m.allowedBytes > 0 {
+		totalMemory = cgLimit - int64(m.allowedBytes)
+	} else {
+		totalMemory = cgLimit * int64(m.allowedPercent) / 100
+	}
+
+	// Compute 1% of that memory as page cache threshold
+	pageCacheSize := totalMemory / 100
+	const minThreshold = 10 << 20 // 10MB
+	if pageCacheSize < minThreshold {
+		pageCacheSize = minThreshold
+	}
+
+	// Ensure we don't exceed available disk space
+	if pageCacheSize > maxSize {
+		return maxSize
+	}
+	return pageCacheSize
+}
+
+// ShouldApplyFadvis implements the fs.ThresholdProvider interface.
+// It checks if the file size exceeds the threshold for large file detection.
+func (m *Memory) ShouldApplyFadvis(fileSize int64, maxSize int64) bool {
+	return fileSize >= m.GetThreshold(maxSize)
+}
+
+// ShouldCache returns whether a file at the given path should be cached.
+// Currently always returns true as the cache decision is made based on file size.
+func (m *Memory) ShouldCache(_ string) bool {
+	return true
+}
+
+var (
+	// Global memory protector instance used by components that need threshold decisions
+	globalMemoryProtector *Memory
+)
+
+// GetMemoryProtector returns the global memory protector instance.
+// If no instance is set, it creates a default one for threshold decisions.
+func GetMemoryProtector() *Memory {
+	if globalMemoryProtector == nil {
+		// Create a default instance for threshold decisions
+		globalMemoryProtector = &Memory{
+			allowedPercent: 75, // Default 75% threshold
+		}
+	}
+	return globalMemoryProtector
+}
+
+// SetMemoryProtector sets the global memory protector instance.
+func SetMemoryProtector(mp *Memory) {
+	globalMemoryProtector = mp
+}
