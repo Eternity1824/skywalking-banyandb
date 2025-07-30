@@ -145,8 +145,11 @@ func (g *gcsFS) Upload(ctx context.Context, p string, data io.Reader) error {
 	}
 
 	// Update metadata with checksum
+	// Only attempt to set metadata when not running against the local emulator.
+	// The fake-gcs-server used in tests does not support the Update call and will
+	// return an error. Detect the test environment via the STORAGE_EMULATOR_HOST
+	// environment variable which is set by the test helper.
 	if os.Getenv("STORAGE_EMULATOR_HOST") == "" {
-		// Skip metadata update in test environment as fake-gcs-server doesn't support it
 		_, err = g.client.Bucket(g.bucket).Object(objPath).Update(ctx, storage.ObjectAttrsToUpdate{
 			Metadata: map[string]string{"checksum_sha256": hash},
 		})
@@ -169,11 +172,11 @@ func (g *gcsFS) Download(ctx context.Context, p string) (io.ReadCloser, error) {
 	if err != nil {
 		if os.Getenv("STORAGE_EMULATOR_HOST") != "" {
 			// In test environment with fake-gcs-server, proceed without verification
-			r, err := obj.NewReader(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create reader: %w", err)
+			reader, readErr := obj.NewReader(ctx)
+			if readErr != nil {
+				return nil, fmt.Errorf("failed to create reader: %w", readErr)
 			}
-			return r, nil
+			return reader, nil
 		}
 		return nil, fmt.Errorf("failed to get object attrs: %w", err)
 	}
@@ -185,21 +188,21 @@ func (g *gcsFS) Download(ctx context.Context, p string) (io.ReadCloser, error) {
 	if expected == "" {
 		if os.Getenv("STORAGE_EMULATOR_HOST") != "" {
 			// fake-gcs-server in tests does not support metadata
-			r, err := obj.NewReader(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create reader: %w", err)
+			reader, readErr := obj.NewReader(ctx)
+			if readErr != nil {
+				return nil, fmt.Errorf("failed to create reader: %w", readErr)
 			}
-			return r, nil
+			return reader, nil
 		}
 		return nil, fmt.Errorf("sha256 metadata missing for object %s", objPath)
 	}
 
-	r, err := obj.NewReader(ctx)
+	reader, err := obj.NewReader(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create reader: %w", err)
 	}
 
-	return g.verifier.Wrap(r, expected), nil
+	return g.verifier.Wrap(reader, expected), nil
 }
 
 func (g *gcsFS) List(ctx context.Context, prefix string) ([]string, error) {
@@ -222,12 +225,10 @@ func (g *gcsFS) List(ctx context.Context, prefix string) ([]string, error) {
 		if g.basePath != "" {
 			key = strings.TrimPrefix(key, basePrefix)
 		}
-		
 		// Skip empty keys or directory markers (objects ending with /)
 		if key == "" || strings.HasSuffix(key, "/") {
 			continue
 		}
-		
 		files = append(files, key)
 	}
 	return files, nil
