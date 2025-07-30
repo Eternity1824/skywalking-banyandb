@@ -172,6 +172,10 @@ func (g *gcsFS) Download(ctx context.Context, p string) (io.ReadCloser, error) {
 		expected = attrs.Metadata[checksumKey]
 	}
 	if expected == "" {
+		if os.Getenv("STORAGE_EMULATOR_HOST") != "" {
+			// fake-gcs-server in tests does not support metadata
+			return obj.NewReader(ctx)
+		}
 		return nil, fmt.Errorf("sha256 metadata missing for object %s", objPath)
 	}
 
