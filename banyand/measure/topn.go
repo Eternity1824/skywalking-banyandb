@@ -183,12 +183,25 @@ func (t *topNStreamingProcessor) Teardown(_ context.Context) error {
 }
 
 func (t *topNStreamingProcessor) Close() error {
-	close(t.src)
+	// Ensure no more writes arrive so that run() can return.
+	// Closing t.in first will unblock the run goroutine which is
+	// receiving from this channel. After it exits, t.Wait() in
+	// Teardown will complete and the goroutine count drops to zero.
+	if t.in != nil {
+		close(t.in)
+	}
+	// Also stop the underlying flow by closing the source channel then
+	// calling streamingFlow.Close().
+	if t.src != nil {
+		close(t.src)
+	}
 	// close streaming flow
 	err := t.streamingFlow.Close()
 	// and wait for error channel close
-	<-t.stopCh
-	t.stopCh = nil
+	if t.stopCh != nil {
+		<-t.stopCh
+		t.stopCh = nil
+	}
 	return err
 }
 
