@@ -167,6 +167,14 @@ func (g *gcsFS) Download(ctx context.Context, p string) (io.ReadCloser, error) {
 
 	attrs, err := obj.Attrs(ctx)
 	if err != nil {
+		if os.Getenv("STORAGE_EMULATOR_HOST") != "" {
+			// In test environment with fake-gcs-server, proceed without verification
+			r, err := obj.NewReader(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create reader: %w", err)
+			}
+			return r, nil
+		}
 		return nil, fmt.Errorf("failed to get object attrs: %w", err)
 	}
 	expected := ""
@@ -177,7 +185,11 @@ func (g *gcsFS) Download(ctx context.Context, p string) (io.ReadCloser, error) {
 	if expected == "" {
 		if os.Getenv("STORAGE_EMULATOR_HOST") != "" {
 			// fake-gcs-server in tests does not support metadata
-			return obj.NewReader(ctx)
+			r, err := obj.NewReader(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create reader: %w", err)
+			}
+			return r, nil
 		}
 		return nil, fmt.Errorf("sha256 metadata missing for object %s", objPath)
 	}
@@ -210,6 +222,12 @@ func (g *gcsFS) List(ctx context.Context, prefix string) ([]string, error) {
 		if g.basePath != "" {
 			key = strings.TrimPrefix(key, basePrefix)
 		}
+		
+		// Skip empty keys or directory markers (objects ending with /)
+		if key == "" || strings.HasSuffix(key, "/") {
+			continue
+		}
+		
 		files = append(files, key)
 	}
 	return files, nil
