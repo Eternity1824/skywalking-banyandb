@@ -145,11 +145,14 @@ func (g *gcsFS) Upload(ctx context.Context, p string, data io.Reader) error {
 	}
 
 	// Update metadata with checksum
-	_, err = g.client.Bucket(g.bucket).Object(objPath).Update(ctx, storage.ObjectAttrsToUpdate{
-		Metadata: map[string]string{"checksum_sha256": hash},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to set metadata: %w", err)
+	if os.Getenv("STORAGE_EMULATOR_HOST") == "" {
+		// Skip metadata update in test environment as fake-gcs-server doesn't support it
+		_, err = g.client.Bucket(g.bucket).Object(objPath).Update(ctx, storage.ObjectAttrsToUpdate{
+			Metadata: map[string]string{"checksum_sha256": hash},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to set metadata: %w", err)
+		}
 	}
 	return nil
 }
