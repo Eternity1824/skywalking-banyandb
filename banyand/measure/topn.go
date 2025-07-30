@@ -190,12 +190,9 @@ func (t *topNStreamingProcessor) Close() error {
 	if t.in != nil {
 		close(t.in)
 	}
-	// Also stop the underlying flow by closing the source channel then
-	// calling streamingFlow.Close().
-	if t.src != nil {
-		close(t.src)
-	}
-	// close streaming flow
+	// Close the streaming flow (which will internally close the source
+	// channel). We must not close t.src manually here, otherwise the source
+	// might be closed twice and panic.
 	err := t.streamingFlow.Close()
 	// and wait for error channel close
 	if t.stopCh != nil {
@@ -375,19 +372,24 @@ func (manager *topNProcessorManager) init(m *databasev1.Measure) {
 
 func (manager *topNProcessorManager) Close() error {
 	manager.Lock()
-	defer manager.Unlock()
 	if manager.closed {
+		manager.Unlock()
 		return nil
 	}
 	manager.closed = true
-	var err error
-	for _, processor := range manager.processorList {
-		err = multierr.Append(err, processor.Close())
-	}
+	processors := manager.processorList
+	// reset internal state while holding the lock so that future calls return early
 	manager.processorList = nil
 	manager.registeredTasks = nil
 	manager.s = nil
 	manager.m = nil
+	manager.Unlock()
+
+	// Close processors outside the lock to avoid deadlocks.
+	var err error
+	for _, processor := range processors {
+		err = multierr.Append(err, processor.Close())
+	}
 	return err
 }
 
