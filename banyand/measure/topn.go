@@ -183,22 +183,12 @@ func (t *topNStreamingProcessor) Teardown(_ context.Context) error {
 }
 
 func (t *topNStreamingProcessor) Close() error {
-	// Ensure no more writes arrive so that run() can return.
-	// Closing t.in first will unblock the run goroutine which is
-	// receiving from this channel. After it exits, t.Wait() in
-	// Teardown will complete and the goroutine count drops to zero.
-	if t.in != nil {
-		close(t.in)
-	}
-	// Close the streaming flow (which will internally close the source
-	// channel). We must not close t.src manually here, otherwise the source
-	// might be closed twice and panic.
+	close(t.src)
+	// close streaming flow
 	err := t.streamingFlow.Close()
 	// and wait for error channel close
-	if t.stopCh != nil {
-		<-t.stopCh
-		t.stopCh = nil
-	}
+	<-t.stopCh
+	t.stopCh = nil
 	return err
 }
 
@@ -334,8 +324,7 @@ func (t *topNStreamingProcessor) handleError() {
 		t.l.Err(err).Str("topN", t.topNSchema.GetMetadata().GetName()).
 			Msg("error occurred during flow setup or process")
 	}
-	// signal Close() that flow exited
-	close(t.stopCh)
+	t.stopCh <- struct{}{}
 }
 
 // topNProcessorManager manages multiple topNStreamingProcessor(s) belonging to a single measure.
@@ -372,24 +361,19 @@ func (manager *topNProcessorManager) init(m *databasev1.Measure) {
 
 func (manager *topNProcessorManager) Close() error {
 	manager.Lock()
+	defer manager.Unlock()
 	if manager.closed {
-		manager.Unlock()
 		return nil
 	}
 	manager.closed = true
-	processors := manager.processorList
-	// reset internal state while holding the lock so that future calls return early
+	var err error
+	for _, processor := range manager.processorList {
+		err = multierr.Append(err, processor.Close())
+	}
 	manager.processorList = nil
 	manager.registeredTasks = nil
 	manager.s = nil
 	manager.m = nil
-	manager.Unlock()
-
-	// Close processors outside the lock to avoid deadlocks.
-	var err error
-	for _, processor := range processors {
-		err = multierr.Append(err, processor.Close())
-	}
 	return err
 }
 
