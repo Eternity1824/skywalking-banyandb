@@ -225,6 +225,7 @@ func (g *gcsFS) List(ctx context.Context, prefix string) ([]string, error) {
 		if g.basePath != "" {
 			key = strings.TrimPrefix(key, basePrefix)
 		}
+		key = strings.TrimPrefix(key, "/")
 		// Skip empty keys or directory markers (objects ending with /)
 		if key == "" || strings.HasSuffix(key, "/") {
 			continue
