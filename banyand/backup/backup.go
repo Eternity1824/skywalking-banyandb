@@ -205,20 +205,35 @@ func getTimeDir(style string) string {
 }
 
 func backupSnapshot(fs remote.FS, snapshotDir, catalog, timeDir string) error {
+	// Calculate the directory of the snapshot relative to the catalog's snapshots root
+	// For example, if snapshotDir = /root/stream/snapshots/default/seg-20250801
+	// then snapshotRelDir = "default/seg-20250801" so that remote paths preserve
+	// the full hierarchy: <timeDir>/<catalog>/<snapshotRelDir>/file
+	snapshotsRoot := filepath.Dir(filepath.Dir(snapshotDir)) // <root>/<catalog>/snapshots
+	snapshotRelDir, err := filepath.Rel(snapshotsRoot, snapshotDir)
+	if err != nil {
+		return err
+	}
+	snapshotRelDir = filepath.ToSlash(snapshotRelDir)
+
 	localFiles, err := getAllFiles(snapshotDir)
 	if err != nil {
 		return err
 	}
 
 	ctx := context.Background()
-	remotePrefix := path.Join(timeDir, catalog) + "/"
+	remoteCatalogPrefix := path.Join(timeDir, catalog) + "/"
 
-	remoteFiles, err := fs.List(ctx, remotePrefix)
+	remoteFiles, err := fs.List(ctx, remoteCatalogPrefix)
 	if err != nil {
 		return err
 	}
+
+	// Build the full remote prefix for this specific snapshot directory.
+	remoteSnapshotPrefix := path.Join(timeDir, catalog, snapshotRelDir)
+
 	for _, relPath := range localFiles {
-		remotePath := path.Join(timeDir, catalog, relPath)
+		remotePath := path.Join(remoteSnapshotPrefix, relPath)
 		if !contains(remoteFiles, remotePath) {
 			if err := uploadFile(ctx, fs, snapshotDir, relPath, remotePath); err != nil {
 				return err
@@ -226,8 +241,23 @@ func backupSnapshot(fs remote.FS, snapshotDir, catalog, timeDir string) error {
 		}
 	}
 
-	deleteOrphanedFiles(ctx, fs, localFiles, remoteFiles, timeDir, catalog)
+	deleteOrphanedFiles(ctx, fs, localFiles, remoteFiles, timeDir, path.Join(catalog, snapshotRelDir))
 	return nil
+}
+
+func deleteOrphanedFiles(ctx context.Context, fs remote.FS, localFiles, remoteFiles []string, timeDir, snapshotPath string) {
+	expected := make(map[string]struct{})
+	for _, f := range localFiles {
+		expected[path.Join(timeDir, snapshotPath, f)] = struct{}{}
+	}
+
+	for _, remoteFile := range remoteFiles {
+		if _, exists := expected[remoteFile]; !exists {
+			if err := fs.Delete(ctx, remoteFile); err != nil {
+				logger.Warningf("Warning: failed to delete orphaned file %s: %v\n", remoteFile, err)
+			}
+		}
+	}
 }
 
 func getAllFiles(root string) ([]string, error) {
@@ -257,21 +287,6 @@ func uploadFile(ctx context.Context, fs remote.FS, snapshotDir, relPath, remoteP
 	defer file.Close()
 
 	return fs.Upload(ctx, remotePath, file)
-}
-
-func deleteOrphanedFiles(ctx context.Context, fs remote.FS, localFiles, remoteFiles []string, timeDir, snapshotName string) {
-	expected := make(map[string]struct{})
-	for _, f := range localFiles {
-		expected[path.Join(timeDir, snapshotName, f)] = struct{}{}
-	}
-
-	for _, remoteFile := range remoteFiles {
-		if _, exists := expected[remoteFile]; !exists {
-			if err := fs.Delete(ctx, remoteFile); err != nil {
-				logger.Warningf("Warning: failed to delete orphaned file %s: %v\n", remoteFile, err)
-			}
-		}
-	}
 }
 
 func contains(slice []string, s string) bool {
