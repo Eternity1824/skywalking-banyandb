@@ -172,8 +172,11 @@ var _ = ginkgo.Describe("Backup All", func() {
 				var remoteList []string
 				var count int
 				remoteDataDir := filepath.Join(latestTimedir, cat)
-				remoteList, err = fs.List(context.Background(), remoteDataDir)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() error {
+					var err error
+					remoteList, err = fs.List(context.Background(), remoteDataDir)
+					return err
+				}, "30s", "5s").Should(gomega.Succeed())
 				count, err = countFilesRecursive(restoredDataDir)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(count).To(gomega.Equal(len(remoteList)))
