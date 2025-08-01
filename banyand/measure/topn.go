@@ -335,6 +335,7 @@ type topNProcessorManager struct {
 	s               logical.TagSpecRegistry
 	registeredTasks []*databasev1.TopNAggregation
 	processorList   []*topNStreamingProcessor
+	stopCh          chan struct{}
 	closed          bool
 	sync.RWMutex
 }
@@ -348,6 +349,7 @@ func (manager *topNProcessorManager) init(m *databasev1.Measure) {
 	if manager.m != nil {
 		return
 	}
+	manager.stopCh = make(chan struct{})
 	manager.m = m
 	tagMapSpec := logical.TagSpecMap{}
 	tagMapSpec.RegisterTagFamilies(m.GetTagFamilies())
@@ -365,6 +367,7 @@ func (manager *topNProcessorManager) Close() error {
 	if manager.closed {
 		return nil
 	}
+	close(manager.stopCh)
 	manager.closed = true
 	var err error
 	for _, processor := range manager.processorList {
@@ -383,6 +386,11 @@ func (manager *topNProcessorManager) onMeasureWrite(seriesID uint64, shardID uin
 		defer manager.RUnlock()
 		if manager.closed {
 			return
+		}
+		select {
+		case <-manager.stopCh:
+			return
+		default:
 		}
 		if manager.m == nil {
 			manager.RUnlock()
