@@ -18,7 +18,7 @@
 package gcs
 
 import (
-	"path/filepath"
+	"path"
 	"testing"
 
 	"github.com/onsi/ginkgo/v2"
@@ -50,7 +50,7 @@ var _ = ginkgo.SynchronizedBeforeSuite(func() []byte {
 	}
 
 	// Create remote FS instance pointing to the emulator
-	fs, err := remotegcs.NewFS(filepath.Join(dockertesthelper.GCSBucketName, testVars.DestDir), &config.FsConfig{
+	fs, err := remotegcs.NewFS(path.Join(dockertesthelper.GCSBucketName, testVars.DestDir), &config.FsConfig{
 		GCP: &config.GCPConfig{
 			Bucket: dockertesthelper.GCSBucketName,
 		},
