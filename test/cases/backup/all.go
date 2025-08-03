@@ -56,13 +56,27 @@ var _ = ginkgo.Describe("Backup All", func() {
 
 			var backupTimeDir string
 			ctx := context.Background()
-			entries, inErr := fs.List(ctx, "")
+
+			// List objects under the destination directory prefix to find the backup time directory.
+			destDirName := filepath.Base(destDir)
+			listPrefix := ""
+			if strings.HasPrefix(destURL, "gcs://") {
+				// fake-gcs-server requires a trailing slash after the base path to list objects correctly.
+				listPrefix = destDirName + "/"
+			}
+			entries, inErr := fs.List(ctx, listPrefix)
 			gomega.Expect(inErr).NotTo(gomega.HaveOccurred())
+
 			datePattern := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 			for _, entry := range entries {
-				dirName := entry
-				if slashIndex := strings.Index(entry, "/"); slashIndex > 0 {
-					dirName = entry[:slashIndex]
+				trimmed := entry
+				if listPrefix != "" {
+					// Remove the prefix we listed with (destDirName+/) so we can inspect date folder.
+					trimmed = strings.TrimPrefix(entry, listPrefix)
+				}
+				dirName := trimmed
+				if slashIndex := strings.Index(trimmed, "/"); slashIndex > 0 {
+					dirName = trimmed[:slashIndex]
 				}
 				if datePattern.MatchString(dirName) {
 					backupTimeDir = dirName
