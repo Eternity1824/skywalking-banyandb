@@ -130,6 +130,7 @@ func (g *gcsFS) Upload(ctx context.Context, p string, data io.Reader) error {
 	}
 
 	objPath := g.getFullPath(p)
+	fmt.Printf("GCS Upload: bucket=%s, path=%s, fullPath=%s\n", g.bucket, p, objPath)
 	wrappedReader, getHash := g.verifier.ComputeAndWrap(data)
 
 	w := g.client.Bucket(g.bucket).Object(objPath).NewWriter(ctx)
@@ -168,6 +169,7 @@ func (g *gcsFS) Download(ctx context.Context, p string) (io.ReadCloser, error) {
 	}
 
 	objPath := g.getFullPath(p)
+	fmt.Printf("GCS Download: bucket=%s, path=%s, fullPath=%s\n", g.bucket, p, objPath)
 	obj := g.client.Bucket(g.bucket).Object(objPath)
 
 	attrs, err := obj.Attrs(ctx)
@@ -204,11 +206,13 @@ func (g *gcsFS) Download(ctx context.Context, p string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("failed to create reader: %w", err)
 	}
 
+	fmt.Printf("GCS Upload completed: %s\n", objPath)
 	return g.verifier.Wrap(reader, expected), nil
 }
 
 func (g *gcsFS) List(ctx context.Context, prefix string) ([]string, error) {
 	fullPrefix := g.getFullPath(prefix)
+	fmt.Printf("GCS List: bucket=%s, prefix=%s, fullPrefix=%s\n", g.bucket, prefix, fullPrefix)
 	it := g.client.Bucket(g.bucket).Objects(ctx, &storage.Query{Prefix: fullPrefix})
 	var files []string
 	basePrefix := g.basePath
@@ -234,6 +238,7 @@ func (g *gcsFS) List(ctx context.Context, prefix string) ([]string, error) {
 		}
 		files = append(files, key)
 	}
+	fmt.Printf("GCS List found %d files with prefix %s\n", len(files), prefix)
 	return files, nil
 }
 
