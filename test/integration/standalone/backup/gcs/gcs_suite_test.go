@@ -18,7 +18,6 @@
 package gcs
 
 import (
-	"path"
 	"testing"
 
 	"github.com/onsi/ginkgo/v2"
@@ -50,7 +49,7 @@ var _ = ginkgo.SynchronizedBeforeSuite(func() []byte {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	// Create FS instance pointing to emulator
-	fs, err := remotegcs.NewFS(path.Join(dockertesthelper.GCSBucketName, testVars.DestDir), &config.FsConfig{
+	fs, err := remotegcs.NewFS(dockertesthelper.GCSBucketName, &config.FsConfig{
 		GCP: &config.GCPConfig{
 			Bucket: dockertesthelper.GCSBucketName,
 		},
@@ -63,7 +62,7 @@ var _ = ginkgo.SynchronizedBeforeSuite(func() []byte {
 	addr := string(address)
 
 	err := backup.SetupConnection(testVars, addr,
-		"gcs:///"+dockertesthelper.GCSBucketName+testVars.DestDir,
+		"gcs:///"+dockertesthelper.GCSBucketName+"/"+testVars.DestDir,
 		nil)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 })

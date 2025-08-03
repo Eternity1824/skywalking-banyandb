@@ -18,7 +18,6 @@
 package gcs
 
 import (
-	"path"
 	"testing"
 
 	"github.com/onsi/ginkgo/v2"
@@ -50,7 +49,7 @@ var _ = ginkgo.SynchronizedBeforeSuite(func() []byte {
 	}
 
 	// Create remote FS instance pointing to the emulator
-	fs, err := remotegcs.NewFS(path.Join(dockertesthelper.GCSBucketName, testVars.DestDir), &config.FsConfig{
+	fs, err := remotegcs.NewFS(dockertesthelper.GCSBucketName, &config.FsConfig{
 		GCP: &config.GCPConfig{
 			Bucket: dockertesthelper.GCSBucketName,
 		},
@@ -67,7 +66,7 @@ var _ = ginkgo.SynchronizedBeforeSuite(func() []byte {
 
 	// Prepare shared context for backup/restore cases
 	backup.SetupSharedContext(testVars,
-		"gcs:///"+dockertesthelper.GCSBucketName+testVars.DestDir,
+		"gcs:///"+dockertesthelper.GCSBucketName+"/"+testVars.DestDir,
 		nil)
 })
 
