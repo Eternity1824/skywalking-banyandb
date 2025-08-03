@@ -51,7 +51,10 @@ var _ = ginkgo.SynchronizedBeforeSuite(func() []byte {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	// Create FS instance pointing to emulator
-	fs, err := remotegcs.NewFS(dockertesthelper.GCSBucketName, &config.FsConfig{
+	ginkgo.By("Creating FS instance pointing to emulator")
+	destDirName := filepath.Base(testVars.DestDir)
+	fsPath := path.Join(dockertesthelper.GCSBucketName, destDirName)
+	fs, err := remotegcs.NewFS(fsPath, &config.FsConfig{
 		GCP: &config.GCPConfig{
 			Bucket: dockertesthelper.GCSBucketName,
 		},
