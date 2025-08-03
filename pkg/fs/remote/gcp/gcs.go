@@ -102,7 +102,7 @@ func NewFS(p string, cfg *config2.FsConfig) (remote.FS, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	fmt.Printf("GCS NewFS: input path=%s, bucket=%s, basePath=%s\n", p, bucket, basePath)
 	return &gcsFS{
 		client:   client,
 		bucket:   bucket,
@@ -114,10 +114,14 @@ func NewFS(p string, cfg *config2.FsConfig) (remote.FS, error) {
 func (g *gcsFS) getFullPath(p string) string {
 	// Clean the path to prevent issues with fake-gcs-server in CI
 	cleanedP := strings.TrimPrefix(p, "/")
+	var fullPath string
 	if g.basePath == "" {
-		return cleanedP
+		fullPath = cleanedP
+	} else {
+		fullPath = path.Join(g.basePath, cleanedP)
 	}
-	return path.Join(g.basePath, cleanedP)
+	fmt.Printf("GCS getFullPath: basePath=%s, input=%s, output=%s\n", g.basePath, p, fullPath)
+	return fullPath
 }
 
 func (g *gcsFS) Upload(ctx context.Context, p string, data io.Reader) error {
