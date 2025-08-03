@@ -18,6 +18,8 @@
 package gcs
 
 import (
+	"path"
+	"path/filepath"
 	"testing"
 
 	"github.com/onsi/ginkgo/v2"
@@ -61,8 +63,9 @@ var _ = ginkgo.SynchronizedBeforeSuite(func() []byte {
 }, func(address []byte) {
 	addr := string(address)
 
+	destDir := filepath.Base(testVars.DestDir)
 	err := backup.SetupConnection(testVars, addr,
-		"gcs:///"+dockertesthelper.GCSBucketName+"/"+testVars.DestDir,
+		"gcs:///"+path.Join(dockertesthelper.GCSBucketName, destDir),
 		nil)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 })
