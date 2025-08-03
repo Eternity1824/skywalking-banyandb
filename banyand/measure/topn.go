@@ -329,15 +329,15 @@ func (t *topNStreamingProcessor) handleError() {
 
 // topNProcessorManager manages multiple topNStreamingProcessor(s) belonging to a single measure.
 type topNProcessorManager struct {
-	sync.RWMutex
 	pipeline        queue.Client
 	s               logical.TagSpecRegistry
-	l               *logger.Logger
 	m               *databasev1.Measure
+	l               *logger.Logger
+	stopCh          chan struct{}
 	registeredTasks []*databasev1.TopNAggregation
 	processorList   []*topNStreamingProcessor
-	stopCh          chan struct{}
-	closed          bool
+	sync.RWMutex
+	closed bool
 }
 
 func (manager *topNProcessorManager) init(m *databasev1.Measure) {
