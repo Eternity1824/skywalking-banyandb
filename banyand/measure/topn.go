@@ -329,14 +329,15 @@ func (t *topNStreamingProcessor) handleError() {
 
 // topNProcessorManager manages multiple topNStreamingProcessor(s) belonging to a single measure.
 type topNProcessorManager struct {
-	l               *logger.Logger
 	pipeline        queue.Client
-	m               *databasev1.Measure
 	s               logical.TagSpecRegistry
+	m               *databasev1.Measure
+	l               *logger.Logger
+	stopCh          chan struct{}
 	registeredTasks []*databasev1.TopNAggregation
 	processorList   []*topNStreamingProcessor
-	closed          bool
 	sync.RWMutex
+	closed bool
 }
 
 func (manager *topNProcessorManager) init(m *databasev1.Measure) {
@@ -348,6 +349,7 @@ func (manager *topNProcessorManager) init(m *databasev1.Measure) {
 	if manager.m != nil {
 		return
 	}
+	manager.stopCh = make(chan struct{})
 	manager.m = m
 	tagMapSpec := logical.TagSpecMap{}
 	tagMapSpec.RegisterTagFamilies(m.GetTagFamilies())
@@ -364,6 +366,9 @@ func (manager *topNProcessorManager) Close() error {
 	defer manager.Unlock()
 	if manager.closed {
 		return nil
+	}
+	if manager.stopCh != nil {
+		close(manager.stopCh)
 	}
 	manager.closed = true
 	var err error
@@ -383,6 +388,11 @@ func (manager *topNProcessorManager) onMeasureWrite(seriesID uint64, shardID uin
 		defer manager.RUnlock()
 		if manager.closed {
 			return
+		}
+		select {
+		case <-manager.stopCh:
+			return
+		default:
 		}
 		if manager.m == nil {
 			manager.RUnlock()

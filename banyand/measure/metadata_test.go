@@ -53,6 +53,12 @@ var _ = Describe("Metadata", func() {
 	})
 
 	AfterEach(func() {
+		GinkgoWriter.Printf("Starting cleanup at %v\n", time.Now())
+		defer func() {
+			if r := recover(); r != nil {
+				GinkgoWriter.Printf("Panic during cleanup: %v\n", r)
+			}
+		}()
 		deferFn()
 		Eventually(gleak.Goroutines, flags.EventuallyTimeout).ShouldNot(gleak.HaveLeaked(goods))
 	})

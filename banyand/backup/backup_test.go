@@ -159,20 +159,26 @@ func (m *mockFS) Close() error { return nil }
 
 func TestBackupSnapshot(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "newfile.txt"), nil, 0o600)
+	segmentDir := "seg-test"
+	// Simulate realistic snapshot directory structure: <root>/snapshots/default/seg-test
+	snapshotDir := filepath.Join(tmpDir, storage.SnapshotsDir, "default", segmentDir)
+	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+		t.Fatalf("failed to create snapshot dir: %v", err)
+	}
+	os.WriteFile(filepath.Join(snapshotDir, "newfile.txt"), nil, 0o600)
 
 	m := &mockFS{}
-	err := backupSnapshot(m, tmpDir, "test-snapshot", "daily")
+	err := backupSnapshot(m, snapshotDir, "test-snapshot", "daily")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	wantUpload := "daily/test-snapshot/newfile.txt"
+	wantUpload := path.Join("daily", "test-snapshot", "default", segmentDir, "newfile.txt")
 	if len(m.uploaded) != 1 || m.uploaded[0] != wantUpload {
 		t.Errorf("uploaded = %v, want %v", m.uploaded, wantUpload)
 	}
 
-	wantDelete := "daily/test-snapshot/existing.txt"
+	wantDelete := path.Join("daily", "test-snapshot", "existing.txt") // existing.txt lives at catalog root in mock List
 	if len(m.deleted) != 1 || m.deleted[0] != wantDelete {
 		t.Errorf("deleted = %v, want %v", m.deleted, wantDelete)
 	}
