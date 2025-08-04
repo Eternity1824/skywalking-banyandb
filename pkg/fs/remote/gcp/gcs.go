@@ -120,6 +120,10 @@ func (g *gcsFS) getFullPath(p string) string {
 	} else {
 		fullPath = path.Join(g.basePath, cleanedP)
 	}
+	// path.Join cleans the path, so we need to restore the trailing slash if it was present
+	if strings.HasSuffix(p, "/") && !strings.HasSuffix(fullPath, "/") {
+		fullPath += "/"
+	}
 	fmt.Printf("GCS getFullPath: basePath=%s, input=%s, output=%s\n", g.basePath, p, fullPath)
 	return fullPath
 }
