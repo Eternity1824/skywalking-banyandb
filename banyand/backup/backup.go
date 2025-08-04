@@ -224,9 +224,17 @@ func backupSnapshot(fs remote.FS, snapshotDir, catalog, timeDir string) error {
 	ctx := context.Background()
 	remoteCatalogPrefix := path.Join(timeDir, catalog) + "/"
 
-	remoteFiles, err := fs.List(ctx, remoteCatalogPrefix)
-	if err != nil {
-		return err
+	var remoteFiles []string
+	var errList error
+
+	if _, ok := fs.(*gcp.GCSFS); ok {
+		// NOTE: Don't list the remote files for GCS. It may fail on some GCS-like services, e.g. fake-gcs-server.
+		remoteFiles = make([]string, 0)
+	} else {
+		remoteFiles, errList = fs.List(ctx, remoteCatalogPrefix)
+		if errList != nil {
+			return errList
+		}
 	}
 
 	// Build the full remote prefix for this specific snapshot directory.

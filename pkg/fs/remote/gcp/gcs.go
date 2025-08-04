@@ -36,11 +36,11 @@ import (
 	config2 "github.com/apache/skywalking-banyandb/pkg/fs/remote/config"
 )
 
-var _ remote.FS = (*gcsFS)(nil)
+var _ remote.FS = (*GCSFS)(nil)
 
-// gcsFS implements remote.FS backed by Google Cloud Storage.
+// GCSFS implements remote.FS backed by Google Cloud Storage.
 // Field order is optimized to reduce struct padding.
-type gcsFS struct {
+type GCSFS struct {
 	client   *storage.Client
 	verifier checksum.Verifier
 	bucket   string
@@ -103,7 +103,7 @@ func NewFS(p string, cfg *config2.FsConfig) (remote.FS, error) {
 		return nil, err
 	}
 	fmt.Printf("GCS NewFS: input path=%s, bucket=%s, basePath=%s\n", p, bucket, basePath)
-	return &gcsFS{
+	return &GCSFS{
 		client:   client,
 		bucket:   bucket,
 		basePath: basePath,
@@ -111,7 +111,7 @@ func NewFS(p string, cfg *config2.FsConfig) (remote.FS, error) {
 	}, nil
 }
 
-func (g *gcsFS) getFullPath(p string) string {
+func (g *GCSFS) getFullPath(p string) string {
 	// Clean the path to prevent issues with fake-gcs-server in CI
 	cleanedP := strings.TrimPrefix(p, "/")
 	var fullPath string
@@ -128,7 +128,7 @@ func (g *gcsFS) getFullPath(p string) string {
 	return fullPath
 }
 
-func (g *gcsFS) Upload(ctx context.Context, p string, data io.Reader) error {
+func (g *GCSFS) Upload(ctx context.Context, p string, data io.Reader) error {
 	if data == nil {
 		return fmt.Errorf("upload data cannot be nil")
 	}
@@ -171,7 +171,7 @@ func (g *gcsFS) Upload(ctx context.Context, p string, data io.Reader) error {
 	return nil
 }
 
-func (g *gcsFS) Download(ctx context.Context, p string) (io.ReadCloser, error) {
+func (g *GCSFS) Download(ctx context.Context, p string) (io.ReadCloser, error) {
 	if g.verifier == nil {
 		return nil, fmt.Errorf("verifier not initialized")
 	}
@@ -218,7 +218,7 @@ func (g *gcsFS) Download(ctx context.Context, p string) (io.ReadCloser, error) {
 	return g.verifier.Wrap(reader, expected), nil
 }
 
-func (g *gcsFS) List(ctx context.Context, prefix string) ([]string, error) {
+func (g *GCSFS) List(ctx context.Context, prefix string) ([]string, error) {
 	fullPrefix := g.getFullPath(prefix)
 	fmt.Printf("GCS List: bucket=%s, prefix=%s, fullPrefix=%s\n", g.bucket, prefix, fullPrefix)
 	it := g.client.Bucket(g.bucket).Objects(ctx, &storage.Query{Prefix: fullPrefix})
@@ -250,11 +250,11 @@ func (g *gcsFS) List(ctx context.Context, prefix string) ([]string, error) {
 	return files, nil
 }
 
-func (g *gcsFS) Delete(ctx context.Context, p string) error {
+func (g *GCSFS) Delete(ctx context.Context, p string) error {
 	objPath := g.getFullPath(p)
 	return g.client.Bucket(g.bucket).Object(objPath).Delete(ctx)
 }
 
-func (g *gcsFS) Close() error {
+func (g *GCSFS) Close() error {
 	return g.client.Close()
 }
